@@ -1,0 +1,6 @@
+{
+  "name": "Portal de Desempenho",
+  "description": "Plataforma corporativa de avaliação, desenvolvimento de colaboradores, Checklist Mestre, matriz de vínculos de critérios e gestão de exercícios e personagens.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
