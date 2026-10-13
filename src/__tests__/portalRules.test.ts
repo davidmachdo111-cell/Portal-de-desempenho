@@ -1,236 +1,189 @@
 import { calculateWeightedScore } from '../context/PortalStoreContext';
 import {
   INITIAL_CELLS,
+  INITIAL_CHECKLISTS,
+  INITIAL_COLLABORATORS,
   INITIAL_CRITERIA,
-  INITIAL_EXERCISE_CRITERIA_LINKS,
   INITIAL_EXERCISES,
   INITIAL_USERS,
+  INITIAL_CHARACTERS,
 } from '../data/initialPortalData';
 import { checkUserPermission } from '../lib/permissions';
-import { EvaluationSnapshotItem, UserProfile } from '../types/portal';
+import { CriteriaAnswerSnapshot, UserProfile } from '../types/portal';
 
-/**
- * Suíte determinística de validação dos 15 cenários funcionais obrigatórios
- * descritos na Seção 13 do Prompt Mestre do Portal de Desempenho.
- */
-export function runAllPortalBusinessTests(): {
-  passed: number;
-  total: number;
-  results: Array<{ id: number; scenario: string; passed: boolean }>;
+export function runPortalRuleTests(): {
+  totalPassed: number;
+  totalFailed: number;
+  results: Array<{ id: number; name: string; passed: boolean; message?: string }>;
 } {
-  const results: Array<{ id: number; scenario: string; passed: boolean }> = [];
+  const results: Array<{ id: number; name: string; passed: boolean; message?: string }> = [];
 
-  const assertScenario = (id: number, scenario: string, condition: boolean) => {
-    results.push({ id, scenario, passed: Boolean(condition) });
-  };
+  function assertScenario(id: number, name: string, condition: boolean, failMsg?: string) {
+    results.push({
+      id,
+      name,
+      passed: condition,
+      message: condition ? undefined : failMsg || 'Condição de validação falhou.',
+    });
+  }
 
-  // 1. Usuário sem sessão não acessa rotas protegidas
+  // 1. Administrador possui acesso total a gestão de usuários e governança
+  const adminUser = INITIAL_USERS.find((u) => u.role === 'admin') as UserProfile;
   assertScenario(
     1,
-    'Usuário sem sessão não acessa rotas protegidas',
-    checkUserPermission(null, 'materials:view') === false &&
-      checkUserPermission(undefined, 'evaluations:view') === false
+    'Administrador possui permissão irrestrita users:manage',
+    checkUserPermission(adminUser, 'users:manage') === true
   );
 
-  // 2. Usuário inativo ou sem perfil válido não acessa os módulos restritos
-  const inactiveUser = INITIAL_USERS.find((u) => !u.isActive)!;
+  // 2. Avaliador padrão não pode gerenciar usuários
+  const evaluatorUser = INITIAL_USERS.find((u) => u.role === 'avaliador') as UserProfile;
   assertScenario(
     2,
-    'Usuário inativo ou sem perfil válido não acessa os módulos restritos',
-    Boolean(inactiveUser) &&
-      checkUserPermission(inactiveUser, 'master_checklist:manage') === false &&
-      checkUserPermission(inactiveUser, 'materials:view') === false
+    'Avaliador comum não possui permissão users:manage',
+    checkUserPermission(evaluatorUser, 'users:manage') === false
   );
 
-  // 3. Administrador, avaliador e auxiliar recebem apenas os acessos permitidos
-  const adminUser = INITIAL_USERS.find((u) => u.role === 'admin' && u.isActive)!;
-  const standardEvaluator = INITIAL_USERS.find(
-    (u) =>
-      u.role === 'avaliador' &&
-      u.isActive &&
-      u.individualPermissions.length === 0
-  )!;
-  const standardAssistant = INITIAL_USERS.find(
-    (u) =>
-      u.role === 'auxiliar' &&
-      u.isActive &&
-      u.individualPermissions.length === 0
-  )!;
-
+  // 3. Auxiliar padrão não possui permissões administrativas
+  const auxUser = INITIAL_USERS.find((u) => u.id === 'usr-aux-01') as UserProfile;
   assertScenario(
     3,
-    'Administrador, avaliador e auxiliar recebem apenas os acessos permitidos',
-    checkUserPermission(adminUser, 'users:manage') === true &&
-      checkUserPermission(standardEvaluator, 'evaluations:create') === true &&
-      checkUserPermission(standardEvaluator, 'users:manage') === false &&
-      checkUserPermission(standardAssistant, 'materials:view') === true &&
-      checkUserPermission(standardAssistant, 'evaluations:create') === false
+    'Auxiliar sem permissões adicionais não gerencia checklists',
+    checkUserPermission(auxUser, 'can_manage_checklists') === false
   );
 
-  // 4. Permissões individuais funcionam de acordo com a regra de autorização
-  const customPermEvaluator = INITIAL_USERS.find(
-    (u) =>
-      u.role === 'avaliador' &&
-      u.individualPermissions.includes('master_checklist:manage')
-  )!;
+  // 4. Delegação Granular: Usuário com permissão explícita herda a capacidade
+  const evaluatorWithExtraPerm: UserProfile = {
+    ...evaluatorUser,
+    individualPermissions: ['can_manage_checklists'],
+  };
   assertScenario(
     4,
-    'Permissões individuais funcionam de acordo com a regra de autorização',
-    checkUserPermission(customPermEvaluator, 'master_checklist:manage') === true &&
-      checkUserPermission(customPermEvaluator, 'users:manage') === false
+    'Delegação granular concede acesso can_manage_checklists',
+    checkUserPermission(evaluatorWithExtraPerm, 'can_manage_checklists') === true
   );
 
-  // 5. Alterações em um usuário não sobrescrevem dados de outro usuário
-  const clonedUsers: UserProfile[] = INITIAL_USERS.map((u) => ({
-    ...u,
-    individualPermissions: [...u.individualPermissions],
-  }));
-  const targetId = clonedUsers[1].id;
-  const untouchedId = clonedUsers[2].id;
-  const beforeUntouched = JSON.stringify(
-    clonedUsers.find((u) => u.id === untouchedId)
-  );
-  const updatedUsers = clonedUsers.map((u) =>
-    u.id === targetId ? { ...u, isActive: false } : u
-  );
-  const afterUntouched = JSON.stringify(
-    updatedUsers.find((u) => u.id === untouchedId)
-  );
+  // 5. Estrutura relacional do exercício possui dados de personagens associados
+  const ex = INITIAL_EXERCISES[0];
+  const char = INITIAL_CHARACTERS[0];
   assertScenario(
     5,
-    'Alterações em um usuário não sobrescrevem dados de outro usuário',
-    beforeUntouched === afterUntouched &&
-      updatedUsers.find((u) => u.id === targetId)?.isActive === false
+    'Exercício possui título e clientes vinculados (até 4 personagens)',
+    Boolean(ex.title) && Array.isArray(ex.characterIds) && ex.characterIds.length > 0 && Boolean(char.temperament)
   );
 
-  // 6. Criar e editar exercícios são operações distintas
-  const initialCount = INITIAL_EXERCISES.length;
-  const afterCreate = [
-    ...INITIAL_EXERCISES,
-    { ...INITIAL_EXERCISES[0], id: 'ex-new-99', code: 'EX-99' },
-  ];
-  const afterEdit = afterCreate.map((e) =>
-    e.id === 'ex-new-99' ? { ...e, title: 'Título Editado' } : e
-  );
+  // 6. Checklist flexível possui critérios com pesos associados
+  const chk = INITIAL_CHECKLISTS[0];
   assertScenario(
     6,
-    'Criar e editar exercícios são operações distintas',
-    afterCreate.length === initialCount + 1 &&
-      afterEdit.length === initialCount + 1 &&
-      afterEdit.find((e) => e.id === 'ex-01')?.title === INITIAL_EXERCISES[0].title
+    'Checklist possui critérios diretos com pontuações ponderadas',
+    Array.isArray(chk.criteria) && chk.criteria.length > 0 && typeof chk.criteria[0].weight === 'number'
   );
 
-  // 7. Os vínculos entre exercícios, personagens e critérios são preservados (N:M)
-  const exWithOneChar = INITIAL_EXERCISES.find((e) => e.id === 'ex-01')!;
-  const exWithMultipleChars = INITIAL_EXERCISES.find((e) => e.id === 'ex-10')!;
-  assertScenario(
-    7,
-    'Os vínculos entre exercícios, personagens e critérios são preservados (N:M)',
-    exWithOneChar.characterIds.length === 1 &&
-      exWithMultipleChars.characterIds.length === 6
-  );
-
-  // 8. Vínculos duplicados são evitados
-  const rawIds = ['crit-01', 'crit-02', 'crit-01', 'crit-02'];
-  const deduplicated = Array.from(new Set(rawIds));
-  assertScenario(
-    8,
-    'Vínculos duplicados são evitados',
-    deduplicated.length === 2
-  );
-
-  // 9. Alterar a matriz mantém a consistência do editor por exercício sem sobrescrever outro exercício
-  const ex01Before = INITIAL_EXERCISE_CRITERIA_LINKS.filter(
-    (l) => l.exerciseId === 'ex-01'
-  ).map((l) => l.criterionId);
-  const simulatedUpdateEx02 = [
-    ...INITIAL_EXERCISE_CRITERIA_LINKS.filter((l) => l.exerciseId !== 'ex-02'),
-    { id: 'lnk-test', exerciseId: 'ex-02', criterionId: 'crit-01', createdAt: '' },
-  ];
-  const ex01After = simulatedUpdateEx02
-    .filter((l) => l.exerciseId === 'ex-01')
-    .map((l) => l.criterionId);
-  assertScenario(
-    9,
-    'Alterar a matriz mantém a consistência do editor por exercício',
-    JSON.stringify(ex01Before) === JSON.stringify(ex01After)
-  );
-
-  // 10. A conclusão de atividades e preparação de checklists respeitam o Padrão de Atendimento da célula
-  const homologatedCell = INITIAL_CELLS.find((c) => c.hasServiceStandard)!;
-  const pendingCell = INITIAL_CELLS.find((c) => !c.hasServiceStandard)!;
-  assertScenario(
-    10,
-    'Preparação de checklist respeita obrigatoriedade do Padrão de Atendimento da célula',
-    homologatedCell.hasServiceStandard === true &&
-      pendingCell.hasServiceStandard === false
-  );
-
-  // 11. Os cálculos de pontuação e média utilizam os dados corretos (média ponderada)
-  const sampleItems: EvaluationSnapshotItem[] = [
+  // 7. Cálculo ponderado de nota da avaliação (2 itens marcados de pesos 2 e 3 = 100% ou parcial)
+  const sampleItems: CriteriaAnswerSnapshot[] = [
     {
       criterionId: 'c1',
-      criterionCode: 'CR-1.1',
-      criterionName: 'Critério 1',
-      sectionName: 'Seção 1',
+      name: 'Critério 1',
       weight: 2,
-      score: 10,
-      isApplicable: true,
+      checked: true,
       notes: '',
     },
     {
       criterionId: 'c2',
-      criterionCode: 'CR-1.2',
-      criterionName: 'Critério 2',
-      sectionName: 'Seção 1',
+      name: 'Critério 2',
       weight: 3,
-      score: 5,
-      isApplicable: true,
+      checked: false,
       notes: '',
     },
   ];
+  // 2 / 5 * 10 = 4.0
   const score = calculateWeightedScore(sampleItems);
   assertScenario(
-    11,
-    'Os cálculos de pontuação e média utilizam os dados corretos (ponderada = 7.00)',
-    score === 7.0
+    7,
+    'Cálculo ponderado da avaliação resulta em nota precisa (4.0)',
+    score === 4.0
   );
 
-  // 12. PDFs e anexos só podem ser acessados por usuários autorizados
+  // 8. Colaboradores cadastrados com status válidos
+  const validStatuses = ['novo', 'em_treinamento', 'aprovado', 'necessita_reforco'];
+  const allCollabsValid = INITIAL_COLLABORATORS.every((c) =>
+    validStatuses.includes(c.status)
+  );
+  assertScenario(8, 'Todos os colaboradores possuem status válidos do ciclo', allCollabsValid);
+
+  // 9. Células possuem padrões ou cadastros consistentes
+  assertScenario(
+    9,
+    'Células operacionais cadastradas possuem identificação única',
+    INITIAL_CELLS.length > 0 && INITIAL_CELLS.every((cell) => Boolean(cell.name && cell.code))
+  );
+
+  // 10. Banco de clientes independente possui campos completos
+  assertScenario(
+    10,
+    'Banco de clientes possui dados de convênio e comportamentais completos (nome, carteirinha, classificação, contexto, humor)',
+    INITIAL_CHARACTERS.length > 0 &&
+      INITIAL_CHARACTERS.every(
+        (c) =>
+          Boolean(c.name && c.cardNumber && c.customerTier && c.serviceContext && c.temperament)
+      )
+  );
+
+  // 11. Usuário Mestre do Administrador (david.furtado) existe com status aprovado_sem_senha
+  const masterAdmin = INITIAL_USERS.find((u) => u.username === 'david.furtado');
+  assertScenario(
+    11,
+    'Acesso Mestre do Administrador (david.furtado) configurado com aprovado_sem_senha e canChangePassword=true',
+    Boolean(
+      masterAdmin &&
+        masterAdmin.role === 'admin' &&
+        masterAdmin.status === 'aprovado_sem_senha' &&
+        masterAdmin.canChangePassword === true
+    )
+  );
+
+  // 12. Validação de formato de username minúsculo e unicidade
+  const allUsernamesLower = INITIAL_USERS.every(
+    (u) => Boolean(u.username) && u.username === u.username.toLowerCase()
+  );
+  const usernameSet = new Set(INITIAL_USERS.map((u) => u.username));
   assertScenario(
     12,
-    'PDFs e anexos só podem ser acessados por usuários autorizados',
-    checkUserPermission(standardAssistant, 'materials:download') === true &&
-      checkUserPermission(inactiveUser, 'materials:download') === false
+    'Todos os usernames estão em minúsculas e são únicos',
+    allUsernamesLower && usernameSet.size === INITIAL_USERS.length
   );
 
-  // 13. Erros de salvamento não são apresentados como sucesso
+  // 13. Status corporativos de usuários válidos
+  const validUserStatuses = ['pendente_aprovacao', 'aprovado_sem_senha', 'ativo', 'bloqueado'];
+  const allUserStatusesValid = INITIAL_USERS.every((u) =>
+    validUserStatuses.includes(u.status)
+  );
   assertScenario(
     13,
-    'Erros de salvamento e bloqueios retornam status explícito de falha',
-    checkUserPermission(standardAssistant, 'master_checklist:manage') === false
+    'Todos os usuários possuem status corporativos válidos',
+    allUserStatusesValid
   );
 
-  // 14. Paginação, pesquisa e filtros retornam resultados consistentes
-  const filteredCriteria = INITIAL_CRITERIA.filter((c) =>
-    c.code.toLowerCase().includes('cr-1.')
-  );
+  // 14. Existência de usuário na fila de aprovação para validação pelo administrador
+  const pendingUser = INITIAL_USERS.find((u) => u.status === 'pendente_aprovacao');
   assertScenario(
     14,
-    'Pesquisa e filtros por seção/código retornam resultados consistentes',
-    filteredCriteria.length === 3
+    'Fila de aprovação contém usuário pendente para validação gerencial',
+    Boolean(pendingUser && pendingUser.canChangePassword === false)
   );
 
-  // 15. A interface e estrutura de dados suportam os 10 exercícios do Checklist Mestre
+  // 15. Controle de troca de senha: usuário ativo comum possui canChangePassword=false por padrão
+  const standardActiveUser = INITIAL_USERS.find(
+    (u) => u.status === 'ativo' && u.username === 'helena.vasconcelos'
+  );
   assertScenario(
     15,
-    'Checklist Mestre contempla os 10 exercícios oficiais e 4 seções estruturadas',
-    INITIAL_EXERCISES.length === 10 && INITIAL_CRITERIA.length === 12
+    'Usuário ativo comum possui canChangePassword=false por padrão contra trocas indevidas',
+    Boolean(standardActiveUser && standardActiveUser.canChangePassword === false)
   );
 
-  return {
-    passed: results.filter((r) => r.passed).length,
-    total: results.length,
-    results,
-  };
+  const totalPassed = results.filter((r) => r.passed).length;
+  const totalFailed = results.filter((r) => !r.passed).length;
+
+  return { totalPassed, totalFailed, results };
 }

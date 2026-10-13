@@ -16,13 +16,53 @@
 }
 
 @media print {
-  .no-print {
+  /* Oculta tudo que não faz parte do relatório ou do roteiro */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Torna visível apenas o conteúdo do relatório ou do roteiro */
+  #printable-report,
+  #printable-report *,
+  #printable-roteiro,
+  #printable-roteiro * {
+    visibility: visible;
+  }
+
+  #printable-report,
+  #printable-roteiro {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: white !important;
+    box-shadow: none !important;
+    color: #0f172a !important;
+  }
+
+  /* Oculta botões e cabeçalhos escuros na impressão */
+  button,
+  .no-print,
+  .print-hidden {
     display: none !important;
   }
-  .print-only {
-    display: block !important;
-  }
-  body {
+
+  body, html {
     background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
   }
 }

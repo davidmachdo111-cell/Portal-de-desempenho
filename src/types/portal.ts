@@ -1,22 +1,29 @@
 export type UserRole = 'admin' | 'avaliador' | 'auxiliar';
 
+// Permissões Granulares
 export type PermissionKey =
-  | 'users:manage'
-  | 'cells:manage'
-  | 'master_checklist:manage'
-  | 'exercises:manage'
-  | 'characters:manage'
-  | 'evaluations:create'
-  | 'evaluations:view'
-  | 'materials:view'
-  | 'materials:download'
-  | 'audit:view';
+  | 'can_manage_collaborators' // pode criar e editar colaboradores
+  | 'can_manage_checklists'    // pode criar e editar checklists e critérios
+  | 'can_manage_exercises'     // pode criar exercícios, personagens e guias
+  | 'can_apply_evaluations'    // pode conduzir e dar check em avaliações
+  | 'users:manage'             // administração de contas de usuário
+  | 'cells:manage';            // gestão de células e equipes
+
+export type UserStatus =
+  | 'pendente_aprovacao'
+  | 'aprovado_sem_senha'
+  | 'ativo'
+  | 'bloqueado';
 
 export interface UserProfile {
   id: string;
-  email: string;
+  username: string; // sempre em minúsculas, ex: 'david.furtado'
   fullName: string;
+  email: string;
   role: UserRole;
+  status: UserStatus;
+  canChangePassword: boolean;
+  password?: string;
   isActive: boolean;
   department: string;
   individualPermissions: PermissionKey[];
@@ -34,28 +41,9 @@ export interface Cell {
   standardUpdatedAt: string;
 }
 
-export interface Collaborator {
-  id: string;
-  registrationCode: string;
-  fullName: string;
-  email: string;
-  cellId: string;
-  roleTitle: string;
-  isActive: boolean;
-  admittedAt: string;
-}
-
-export interface ChecklistSection {
-  id: string;
-  code: string;
-  name: string;
-  orderIndex: number;
-}
-
 export interface Criterion {
   id: string;
   code: string;
-  sectionId: string;
   sectionName: string;
   name: string;
   description: string;
@@ -63,71 +51,126 @@ export interface Criterion {
   isActive: boolean;
 }
 
+// 1. Categorias Padronizadas
+export type CategoryType = 'checklist' | 'exercise' | 'geral';
+
+export interface Category {
+  id: string;
+  name: string;
+  type: CategoryType;
+  description?: string;
+}
+
+export type Gender = 'Masculino' | 'Feminino' | 'Outro';
+export type CustomerTier = 'Iniciante' | 'Mediano' | 'Intermediário';
+export type ExerciseDifficulty = 'Iniciante' | 'Mediano' | 'Intermediário';
+
+// 2. characters: Banco de Clientes / Personagens Independentes
 export interface Character {
   id: string;
-  code: string;
   name: string;
-  archetype: string;
-  profileSummary: string;
-  difficultyLevel: 'Básico' | 'Intermediário' | 'Avançado';
-  customerMood: string;
-  keyObjections: string[];
+  age: string; // ex: '45 anos'
+  gender: Gender; // Sexo
+  city: string; // ex: 'São Paulo - SP'
+  cardNumber: string; // Número da Carteirinha
+  customerTier: CustomerTier; // Classificação: Iniciante, Mediano, Intermediário
+  serviceContext: string; // Contexto do Atendimento (substitui histórico antigo)
+  temperament: string; // humor/comportamento
+  objectives: string; // o que quer no atendimento
+  typicalPhrases: string; // frases e objeções que deve falar
+  guideAttachmentUrl?: string | null; // Guia de Atendimento do Cliente (PDF/imagem)
+  guideAttachmentName?: string | null;
+  createdAt: string;
+  // Compatibilidade legada opcional
+  history?: string;
 }
 
-export interface ExerciseAttachment {
-  id: string;
-  title: string;
-  fileName: string;
-  fileSizeKb: number;
-  storagePath: string;
-  documentType: 'Guia do Avaliador' | 'Roteiro do Personagem' | 'Padrão de Atendimento' | 'Anexo Técnico';
-  contentSummary: string[];
-}
-
+// 3. exercises: Cenários de treinamento vinculando até 4 clientes
 export interface Exercise {
   id: string;
-  code: string;
-  orderIndex: number; // 1 a 10 para o Checklist Mestre
   title: string;
-  objective: string;
-  scenarioDescription: string;
-  estimatedMinutes: number;
-  isActive: boolean;
-  characterIds: string[]; // Relação N:M real
-  attachments: ExerciseAttachment[];
+  difficulty: ExerciseDifficulty; // Classificação de Dificuldade (Iniciante, Mediano, Intermediário)
+  categoryId?: string; // FK categories (opcional/legado)
+  categoryName?: string; // Denormalizado para exibição
+  scenarioInstructions: string; // orientações do caso
+  characterIds: string[]; // Vínculo N:M - até 4 clientes por exercício
+  createdAt: string;
+  updatedAt?: string;
+  // Compatibilidade transitória
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
 }
 
-export interface ExerciseCriterionLink {
+// 4. checklists: Modelos flexíveis (com ou sem exercícios simulados)
+export interface ChecklistCriterion {
   id: string;
-  exerciseId: string;
-  criterionId: string;
+  name: string; // título do critério
+  weight: number; // peso/pontuação (default 1)
+}
+
+export interface Checklist {
+  id: string;
+  title: string;
+  description: string;
+  categoryId?: string;
+  categoryName?: string;
+  hasExercises: boolean; // default false
+  exerciseIds: string[]; // Vínculo N:M opcional
+  criteria: ChecklistCriterion[]; // Critérios diretos do checklist
+  isActive: boolean;
   createdAt: string;
+  updatedAt: string;
+}
+
+// 5. collaborators: Colaboradores em Treinamento
+export type CollaboratorStatus = 'novo' | 'em_treinamento' | 'aprovado' | 'necessita_reforco';
+
+export interface Collaborator {
+  id: string;
+  fullName: string;
+  roleTitle: string;
+  cellTeam: string; // nome ou código da célula
+  registrationCode?: string;
+  status: CollaboratorStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// 6. collaborator_checklists: Atribuição e Resultados das Avaliações
+export type CollaboratorChecklistStatus = 'pendente' | 'em_andamento' | 'concluido';
+
+export interface CriteriaAnswerSnapshot {
+  criterionId: string;
+  name: string;
+  weight: number;
+  checked: boolean;
+  notes?: string;
 }
 
 export interface EvaluationSnapshotItem {
   criterionId: string;
-  criterionCode: string;
+  criterionCode?: string;
   criterionName: string;
-  sectionName: string;
+  sectionName?: string;
   weight: number;
-  score: number; // 0 a 10
+  score: number;
   isApplicable: boolean;
-  notes: string;
+  notes?: string;
 }
 
-export interface Evaluation {
+export interface CollaboratorChecklist {
   id: string;
-  code: string;
   collaboratorId: string;
-  cellId: string;
-  evaluatorId: string;
-  exerciseId: string;
-  status: 'in_progress' | 'completed';
-  finalScore: number | null;
-  criteriaSnapshot: EvaluationSnapshotItem[];
-  generalFeedback: string;
-  startedAt: string;
-  completedAt: string | null;
+  checklistId: string;
+  status: CollaboratorChecklistStatus;
+  finalScore?: number | null;
+  criteriaAnswers: CriteriaAnswerSnapshot[];
+  generalObservations?: string | null;
+  instructorAuxiliarId?: string | null;
+  actorAuxiliarId?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AuditLogEntry {
@@ -137,7 +180,7 @@ export interface AuditLogEntry {
   actorName: string;
   actorRole: UserRole;
   action: string;
-  module: 'Autenticação' | 'Checklist Mestre' | 'Avaliações' | 'Exercícios & Personagens' | 'Administração';
+  module: 'Autenticação' | 'Colaboradores' | 'Checklists' | 'Exercícios' | 'Personagens' | 'Avaliações' | 'Administração' | 'Categorias';
   targetDescription: string;
   status: 'Sucesso' | 'Bloqueado' | 'Erro';
 }
